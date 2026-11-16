@@ -559,20 +559,6 @@ if (!function_exists('dispatchRequisitionPdfTelegram')) {
             }
         }
 
-        if (!$pdfPath || !file_exists($pdfPath) || filesize($pdfPath) === 0) {
-            $errMsg = 'ไม่สามารถสร้างไฟล์ PDF เอกสารใบเบิกได้ กรุณาตรวจสอบ Chrome/Node.js ในระบบ';
-            if (!empty($cliError)) {
-                $errMsg .= ' (' . trim($cliError) . ')';
-            }
-            return [
-                'success' => false,
-                'status' => 'error',
-                'message' => $errMsg,
-                'pdf_url' => '',
-                'filename' => ''
-            ];
-        }
-
         // Format Caption for Telegram
         $requesterText = implode(', ', array_slice($requesterNames, 0, 3));
         if (count($requesterNames) > 3) {
@@ -592,6 +578,80 @@ if (!function_exists('dispatchRequisitionPdfTelegram')) {
                    "ส่วนงาน: {$safeSectionName}\n" .
                    "สถานะ: <b>อนุมัติเรียบร้อย พร้อมเบิกจ่าย</b>\n" .
                    "ส่งเมื่อ: {$thaiDateStr}";
+
+        if (!$pdfPath || !file_exists($pdfPath) || filesize($pdfPath) === 0) {
+            // On Vercel Serverless (no local Chrome/Node.js), fall back to sending text notification to Telegram
+            if (getenv('VERCEL')) {
+                $appBaseUrl = getenv('BASE_URL') ?: (getenv('VERCEL_URL') ? 'https://' . rtrim(getenv('VERCEL_URL'), '/') . '/' : '');
+                $printParam = $isGroup ? ('group=' . urlencode($idOrCode)) : ('id=' . urlencode($idOrCode));
+                $printUrl = $appBaseUrl ? ($appBaseUrl . 'export_pdf_request.php?' . $printParam) : '';
+
+                $textMsg = "📄 <b>แจ้งเตือนใบเบิกพัสดุ</b>\n" .
+                           "เลขที่ใบเบิก: <b>{$safePrimaryCode}</b>\n" .
+                           "ผู้ขอเบิก: <b>{$safeRequesterText}</b>\n" .
+                           "ส่วนงาน: {$safeSectionName}\n" .
+                           "สถานะ: <b>อนุมัติเรียบร้อย พร้อมเบิกจ่าย</b>\n" .
+                           "ส่งเมื่อ: {$thaiDateStr}";
+                if ($printUrl !== '') {
+                    $textMsg .= "\n🔗 <a href=\"" . htmlspecialchars($printUrl, ENT_QUOTES, 'UTF-8') . "\">เปิดดู/พิมพ์ใบเบิก</a>";
+                }
+
+                $sentTargets = [];
+                $errors = [];
+                if (!empty($groupChatId)) {
+                    $resGroup = sendTelegramDirect($botToken, $groupChatId, $textMsg);
+                    if (!empty($resGroup['success'])) {
+                        $sentTargets[] = 'กลุ่ม Telegram ส่วนกลาง';
+                    } else {
+                        $errors[] = 'กลุ่มส่วนกลาง: ' . ($resGroup['message'] ?? 'ไม่สำเร็จ');
+                    }
+                }
+                foreach ($requesterTelegrams as $uChatId) {
+                    if ($uChatId === $groupChatId) continue;
+                    $resUser = sendTelegramDirect($botToken, $uChatId, $textMsg);
+                    if (!empty($resUser['success'])) {
+                        $sentTargets[] = "ผู้ขอเบิก (Telegram Chat: {$uChatId})";
+                    } else {
+                        $errors[] = "ผู้ขอเบิก ({$uChatId}): " . ($resUser['message'] ?? 'ไม่สำเร็จ');
+                    }
+                }
+
+                if (empty($sentTargets)) {
+                    $errDetail = !empty($errors) ? implode('; ', $errors) : 'ไม่พบบัญชี Telegram ของกลุ่มส่วนกลางหรือผู้ขอเบิก';
+                    return [
+                        'success' => false,
+                        'status' => 'warning',
+                        'message' => 'ไม่สามารถส่งข้อความเข้า Telegram ได้ (' . $errDetail . ')',
+                        'pdf_url' => '',
+                        'filename' => '',
+                        'sent_targets' => [],
+                        'errors' => $errors
+                    ];
+                }
+
+                return [
+                    'success' => true,
+                    'status' => 'success',
+                    'message' => 'ส่งข้อความแจ้งเตือนใบเบิกไปยัง Telegram เรียบร้อยแล้ว (ส่งเป็นข้อความพร้อมลิงก์ใบเบิก เนื่องจาก Vercel Serverless ไม่มี Chrome สำหรับเรนเดอร์ PDF)',
+                    'pdf_url' => $printUrl,
+                    'filename' => $displayFilename,
+                    'sent_targets' => $sentTargets,
+                    'errors' => $errors
+                ];
+            }
+
+            $errMsg = 'ไม่สามารถสร้างไฟล์ PDF เอกสารใบเบิกได้ กรุณาตรวจสอบ Chrome/Node.js ในระบบ';
+            if (!empty($cliError)) {
+                $errMsg .= ' (' . trim($cliError) . ')';
+            }
+            return [
+                'success' => false,
+                'status' => 'error',
+                'message' => $errMsg,
+                'pdf_url' => '',
+                'filename' => ''
+            ];
+        }
 
         $sentTargets = [];
         $errors = [];
