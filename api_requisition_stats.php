@@ -32,7 +32,7 @@ try {
         JOIN requests r ON ri.request_id = r.id
         JOIN supplies s ON ri.supply_id = s.id
         WHERE r.user_id = ? 
-          AND YEAR(r.request_date) = ?
+          AND EXTRACT(YEAR FROM r.request_date) = ?
           AND r.status IN ('approved', 'completed')
           AND (ri.is_deleted IS NULL OR ri.is_deleted = 0)
         GROUP BY s.id, s.code, s.name, s.unit, s.inspection_threshold

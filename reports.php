@@ -12,7 +12,8 @@ if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'dire
 $year = isset($_GET['year']) ? (int) $_GET['year'] : date('Y');
 
 // Get available years from database
-$availableYears = $pdo->query("SELECT DISTINCT YEAR(request_date) as year FROM requests WHERE request_date IS NOT NULL ORDER BY year DESC")->fetchAll(PDO::FETCH_COLUMN);
+$availableYears = $pdo->query("SELECT DISTINCT EXTRACT(YEAR FROM request_date) as year FROM requests WHERE request_date IS NOT NULL ORDER BY year DESC")->fetchAll(PDO::FETCH_COLUMN);
+$availableYears = array_map('intval', $availableYears);
 if (empty($availableYears)) {
     $availableYears = [date('Y')];
 }
@@ -27,11 +28,11 @@ $stats = [
 
 // 2. Monthly Requests (Isolate by Year)
 $monthlyData = array_fill(1, 12, 0);
-$sqlMonthly = "SELECT MONTH(request_date) as m, COUNT(*) as c FROM requests WHERE YEAR(request_date) = ? GROUP BY m";
+$sqlMonthly = "SELECT EXTRACT(MONTH FROM request_date) as m, COUNT(*) as c FROM requests WHERE EXTRACT(YEAR FROM request_date) = ? GROUP BY m";
 $stmt = $pdo->prepare($sqlMonthly);
 $stmt->execute([$year]);
 while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-    $monthlyData[$row['m']] = $row['c'];
+    $monthlyData[(int)$row['m']] = (int)$row['c'];
 }
 $monthLabels = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 $monthValues = array_values($monthlyData);
@@ -42,7 +43,7 @@ $sqlTop = "SELECT s.name as material_name, s.code as material_code, SUM(COALESCE
             JOIN supplies s ON ri.supply_id = s.id 
             JOIN requests r ON ri.request_id = r.id
             WHERE r.status IN ('approved', 'completed') AND (ri.is_deleted IS NULL OR ri.is_deleted = 0)
-            GROUP BY ri.supply_id 
+            GROUP BY ri.supply_id, s.name, s.code, s.unit 
             ORDER BY total_qty DESC 
             LIMIT 10";
 $topItems = $pdo->query($sqlTop)->fetchAll(PDO::FETCH_ASSOC);

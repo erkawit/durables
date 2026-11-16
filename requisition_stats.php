@@ -15,8 +15,8 @@ $userStmt = $pdo->query("SELECT id, prefix, firstname, lastname, section, role F
 $users = $userStmt->fetchAll();
 
 // Fetch years
-$yearQuery = $pdo->query("SELECT DISTINCT YEAR(request_date) AS yr FROM requests WHERE request_date IS NOT NULL ORDER BY yr DESC");
-$years = $yearQuery->fetchAll(PDO::FETCH_COLUMN);
+$yearQuery = $pdo->query("SELECT DISTINCT EXTRACT(YEAR FROM request_date) AS yr FROM requests WHERE request_date IS NOT NULL ORDER BY yr DESC");
+$years = array_map('intval', $yearQuery->fetchAll(PDO::FETCH_COLUMN));
 
 // Always ensure current year is in the list
 $currentYear = (int)date('Y');

@@ -204,7 +204,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     if (!$force) {
         $userId = $_SESSION['user_id'];
         $stmt = $pdo->prepare(
-            "SELECT ci.qty, ci.user_id, CONCAT(IFNULL(u.prefix,''), u.firstname, ' ', u.lastname) AS full_name
+            "SELECT ci.qty, ci.user_id, CONCAT(COALESCE(u.prefix,''), u.firstname, ' ', u.lastname) AS full_name
              FROM cart_items ci
              LEFT JOIN users u ON u.id = ci.user_id
              WHERE ci.supply_id = ? AND ci.user_id != ? AND ci.added_at >= ?"
