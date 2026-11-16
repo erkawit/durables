@@ -1,0 +1,9 @@
+node_server/
+database/
+backups/
+.agents/
+.claude/
+.neon
+.env
+.env.local
+.env.*.local
