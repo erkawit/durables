@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS requests (
     approver_director_id INT DEFAULT NULL,
     approver_director_date TIMESTAMP WITH TIME ZONE DEFAULT NULL,
     reject_reason TEXT DEFAULT NULL,
-    user_acknowledged BOOLEAN DEFAULT FALSE,
+    user_acknowledged SMALLINT DEFAULT 0,
     user_acknowledged_date TIMESTAMP WITH TIME ZONE DEFAULT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_requests_user_id ON requests(user_id);
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS request_items (
     original_qty INT DEFAULT NULL,
     approved_qty INT DEFAULT NULL,
     edit_reason TEXT DEFAULT NULL,
-    is_deleted BOOLEAN DEFAULT FALSE
+    is_deleted SMALLINT DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_request_items_req ON request_items(request_id);
 CREATE INDEX IF NOT EXISTS idx_request_items_supply ON request_items(supply_id);
@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     user_id INT NOT NULL,
     message TEXT NOT NULL,
     link VARCHAR(255) DEFAULT '',
-    is_read BOOLEAN DEFAULT FALSE,
+    is_read SMALLINT DEFAULT 0,
     type VARCHAR(50) DEFAULT 'info',
     related_id INT DEFAULT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS delay_false_login (
     ip_address VARCHAR(50) NOT NULL,
     username VARCHAR(100) NOT NULL,
     attempts INT DEFAULT 1,
-    status BOOLEAN DEFAULT FALSE,
+    status SMALLINT DEFAULT 0,
     last_attempt TIMESTAMP WITH TIME ZONE NOT NULL,
     CONSTRAINT ip_user UNIQUE (ip_address, username)
 );
