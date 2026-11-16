@@ -41,7 +41,7 @@ if (!function_exists('sendTelegramDirect')) {
         $response = curl_exec($ch);
         $curlError = curl_error($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        unset($ch);
 
         if ($curlError) {
             return ['success' => false, 'message' => 'cURL Error: ' . $curlError];
@@ -114,7 +114,7 @@ if (!function_exists('sendTelegramDocument')) {
         $response = curl_exec($ch);
         $curlError = curl_error($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        unset($ch);
 
         if ($curlError) {
             return ['success' => false, 'message' => 'cURL Error: ' . $curlError];
@@ -141,7 +141,7 @@ if (!function_exists('sendTelegramDocument')) {
             curl_setopt($chRetry, CURLOPT_TIMEOUT, 45);
             curl_setopt($chRetry, CURLOPT_CONNECTTIMEOUT, 15);
             $retryResp = curl_exec($chRetry);
-            curl_close($chRetry);
+            unset($chRetry);
 
             $retryData = json_decode($retryResp, true);
             if (!empty($retryData['ok'])) {
@@ -491,7 +491,7 @@ if (!function_exists('dispatchRequisitionPdfTelegram')) {
             curl_setopt($chNode, CURLOPT_CONNECTTIMEOUT, 2);
             $nodeResp = curl_exec($chNode);
             $nodeHttp = curl_getinfo($chNode, CURLINFO_HTTP_CODE);
-            curl_close($chNode);
+            unset($chNode);
 
             if ($nodeHttp === 200 && !empty($nodeResp)) {
                 $nodeData = json_decode($nodeResp, true);

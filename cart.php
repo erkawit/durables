@@ -310,7 +310,7 @@ if (isset($_POST['action']) && $_POST['action'] == 'submit_request') {
         curl_setopt($ch, CURLOPT_TIMEOUT, 3);
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        unset($ch);
         
         if ($httpCode === 200) {
             $resObj = json_decode($response, true);
@@ -446,7 +446,7 @@ if (isset($_POST['action']) && $_POST['action'] == 'submit_request') {
             ]));
             curl_setopt($chNotify, CURLOPT_TIMEOUT, 2);
             curl_exec($chNotify);
-            curl_close($chNotify);
+            unset($chNotify);
         }
 
         try {
