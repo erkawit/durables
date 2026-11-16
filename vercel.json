@@ -1,8 +1,9 @@
 {
   "version": 2,
   "functions": {
-    "*.php": {
+    "api/index.php": {
       "runtime": "vercel-php@0.9.0",
+      "includeFiles": "*.php",
       "excludeFiles": "{node_modules,node_server,database,backups,uploads,img,.agents,.claude,src,scripts}/**"
     }
   },
@@ -11,28 +12,8 @@
       "handle": "filesystem"
     },
     {
-      "src": "/img/(.*)",
-      "dest": "/img/$1"
-    },
-    {
-      "src": "/js/(.*)",
-      "dest": "/js/$1"
-    },
-    {
-      "src": "/css/(.*)",
-      "dest": "/css/$1"
-    },
-    {
-      "src": "/uploads/(.*)",
-      "dest": "/uploads/$1"
-    },
-    {
-      "src": "/",
-      "dest": "/index.php"
-    },
-    {
       "src": "/(.*)",
-      "dest": "/$1"
+      "dest": "/api/index.php"
     }
   ]
 }

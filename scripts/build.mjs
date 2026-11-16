@@ -27,6 +27,7 @@ await import('pg');
 
 console.log('3. Checking PHP syntax (if php CLI is available)...');
 try {
+  run('php', ['-l', 'api/index.php']);
   run('php', ['-l', 'config.php']);
   run('php', ['-l', 'session_handler.php']);
 } catch (err) {
