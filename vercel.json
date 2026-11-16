@@ -2,10 +2,14 @@
   "version": 2,
   "functions": {
     "*.php": {
-      "runtime": "vercel-php@0.7.3"
+      "runtime": "vercel-php@0.9.0",
+      "excludeFiles": "{node_modules,node_server,database,backups,uploads,img,.agents,.claude,src,scripts}/**"
     }
   },
   "routes": [
+    {
+      "handle": "filesystem"
+    },
     {
       "src": "/img/(.*)",
       "dest": "/img/$1"
