@@ -59,6 +59,12 @@ if (!isset($db_driver)) {
 
 try {
     if ($db_driver === 'pgsql') {
+        if (strpos($db_host, '.neon.tech') !== false && strpos($db_pass, 'endpoint=') === false) {
+            $neonEndpoint = preg_replace('/-pooler$/', '', explode('.', $db_host)[0]);
+            if ($neonEndpoint !== '') {
+                $db_pass = "endpoint={$neonEndpoint};{$db_pass}";
+            }
+        }
         $dsn = "pgsql:host=$db_host;port=$db_port;dbname=$db_name";
         if (!empty($db_ssl)) {
             $dsn .= ";sslmode=$db_ssl";
