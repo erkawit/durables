@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/xampp/**)",
+      "Bash(./mysql/bin/mysql -u root -e \"SHOW DATABASES;\")",
+      "Bash(./mysql/bin/mysql -u root -e \"SELECT COUNT\\(*\\) FROM asset_management_db.users;\")",
+      "Bash(./mysql/bin/mysql -u root -e \"SHOW CREATE TABLE asset_management_db.users\\\\G\")",
+      "Bash(./mysql/bin/mysql -u root -e \"DROP DATABASE asset_management_db; CREATE DATABASE asset_management_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\")",
+      "Bash(./mysql/bin/mysql -u root --force asset_management_db)",
+      "Bash(rm /c/xampp/mysql/data/asset_management_db/*.ibd)",
+      "Bash(rm /c/xampp/mysql/data/asset_management_db/*.frm)",
+      "Bash(./mysql/bin/mysql -u root -e \"SELECT id, username, role, status FROM asset_management_db.users LIMIT 5;\")",
+      "Bash(/Applications/XAMPP/xamppfiles/bin/php -l /Applications/XAMPP/xamppfiles/htdocs/durables/inventory.php)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "Bash(grep \"\\\\.php$\")",
+      "Bash(mysql -u root durables_db -e \"DESCRIBE users; DESCRIBE requests; DESCRIBE request_items;\")",
+      "Bash(/Applications/XAMPP/xamppfiles/bin/mysql -u root durables_db -e \"DESCRIBE users; DESCRIBE requests; DESCRIBE request_items;\")",
+      "Bash(/Applications/XAMPP/xamppfiles/bin/mysql -u root durables_db -e \"SELECT * FROM notifications LIMIT 5;\")",
+      "Bash(/Applications/XAMPP/xamppfiles/bin/mysql -u root durables_db -e \"SELECT req_id, user_id, section, status, request_name, last_approve FROM requests ORDER BY req_id DESC LIMIT 10;\")",
+      "Bash(php -l /Applications/XAMPP/xamppfiles/htdocs/durables/reports.php)",
+      "Bash(php -l /Applications/XAMPP/xamppfiles/htdocs/durables/export_pdf_report.php)",
+      "Bash(/Applications/XAMPP/xamppfiles/bin/php -l /Applications/XAMPP/xamppfiles/htdocs/durables/reports.php)",
+      "Bash(/Applications/XAMPP/xamppfiles/bin/php -l /Applications/XAMPP/xamppfiles/htdocs/durables/export_pdf_report.php)"
+    ]
+  }
+}

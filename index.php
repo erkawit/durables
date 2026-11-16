@@ -1,0 +1,630 @@
+<?php
+require_once 'config.php';
+
+// สร้างตาราง delay_false_login หากยังไม่มี
+try {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS delay_false_login (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ip_address VARCHAR(50) NOT NULL,
+        username VARCHAR(100) NOT NULL,
+        attempts INT DEFAULT 1,
+        status TINYINT(1) DEFAULT 0,
+        last_attempt DATETIME NOT NULL,
+        UNIQUE KEY ip_user (ip_address, username)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+} catch (PDOException $e) {
+}
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['username']) && isset($_POST['password'])) {
+    $username = trim($_POST['username']);
+    $password = trim($_POST['password']);
+    $ip = $_SERVER['REMOTE_ADDR'];
+    $now = date('Y-m-d H:i:s');
+
+    // ตรวจสอบในตาราง delay_false_login ก่อน
+    $stmtDelay = $pdo->prepare("SELECT * FROM delay_false_login WHERE ip_address = ? AND LOWER(username) = LOWER(?)");
+    $stmtDelay->execute([$ip, $username]);
+    $delayRecord = $stmtDelay->fetch();
+
+    if ($delayRecord && $delayRecord['status'] == 1) {
+        // อัปเดตเวลาล่าสุดเพื่อให้ cooldown นับเริ่ม 60 วินาทีใหม่เสมอเมื่อพยายามเข้ามา
+        $updateStmt = $pdo->prepare("UPDATE delay_false_login SET last_attempt = ? WHERE id = ?");
+        $updateStmt->execute([$now, $delayRecord['id']]);
+
+        echo json_encode(['status' => 'locked', 'message' => 'คุณกรอกรหัสผ่านผิดเกิน 3 ครั้ง กรุณารอ 60 วินาที']);
+        exit;
+    }
+
+    // ตรวจสอบ username/password ตามปกติในตาราง users (ค้นหาแบบไม่สนตัวพิมพ์เล็ก-ใหญ่)
+    $stmt = $pdo->prepare("SELECT * FROM users WHERE LOWER(username) = LOWER(?)");
+    $stmt->execute([$username]);
+    $user = $stmt->fetch();
+
+    $validLogin = false;
+    $isResetPassword = false;
+
+    if ($user && ($user['status'] === 'active' || empty($user['status']))) {
+        // 1. ตรวจสอบรหัสผ่านแบบปกติ
+        if (password_verify($password, $user['password'])) {
+            $validLogin = true;
+        } else {
+            // 2. Fallback: ตรวจสอบกับรหัสผ่านที่เพิ่งรีเซ็ตจากตาราง user_password_resets
+            try {
+                $checkReset = $pdo->prepare("SELECT * FROM user_password_resets WHERE user_id = ? AND is_active = 1 ORDER BY id DESC LIMIT 1");
+                $checkReset->execute([$user['id']]);
+                $resetRow = $checkReset->fetch();
+                if ($resetRow && trim($resetRow['temp_password']) === $password) {
+                    $validLogin = true;
+                    $isResetPassword = true;
+
+                    // อัปเดต hash ในตาราง users ให้ตรงกับรหัสผ่านทันที
+                    $fixedHash = password_hash($password, PASSWORD_DEFAULT);
+                    $updateHash = $pdo->prepare("UPDATE users SET password = ? WHERE id = ?");
+                    $updateHash->execute([$fixedHash, $user['id']]);
+                }
+            } catch (Exception $e) {}
+        }
+
+        // ตรวจสอบสถานะว่ารหัสที่เข้าสู่ระบบเป็นรหัสรีเซ็ตหรือไม่
+        if ($validLogin && !$isResetPassword) {
+            try {
+                $checkReset = $pdo->prepare("SELECT * FROM user_password_resets WHERE user_id = ? AND is_active = 1 ORDER BY id DESC LIMIT 1");
+                $checkReset->execute([$user['id']]);
+                $resetRow = $checkReset->fetch();
+                if ($resetRow && trim($resetRow['temp_password']) === $password) {
+                    $isResetPassword = true;
+                }
+            } catch (Exception $e) {}
+        }
+    }
+
+    if ($validLogin) {
+        // ล็อกอินสำเร็จ: clear ประวัติการล็อกอินผิดพลาดสำหรับ IP และ username นี้
+        $deleteStmt = $pdo->prepare("DELETE FROM delay_false_login WHERE ip_address = ? OR LOWER(username) = LOWER(?)");
+        $deleteStmt->execute([$ip, $username]);
+
+        $_SESSION['user_id'] = $user['id'];
+        $_SESSION['username'] = $user['username'];
+        $_SESSION['role'] = $user['role'];
+        $_SESSION['fullname'] = $user['prefix'] . $user['firstname'] . ' ' . $user['lastname'];
+        $_SESSION['section'] = $user['section'];
+
+        if ($password === 'password' || $isResetPassword) {
+            $_SESSION['force_password_change'] = true;
+            $_SESSION['force_password_reason'] = $isResetPassword ? 'reset' : 'default';
+        }
+
+        logAction($pdo, $user['id'], 'login', 'index.php', 'User logged in successfully');
+
+        echo json_encode(['status' => 'success', 'message' => 'เข้าสู่ระบบสำเร็จ', 'role' => $user['role']]);
+        exit;
+    } else {
+        // ล็อกอินไม่สำเร็จ
+        if ($delayRecord) {
+            $newAttempts = $delayRecord['attempts'] + 1;
+            $newStatus = ($newAttempts >= 3) ? 1 : 0;
+            $updateStmt = $pdo->prepare("UPDATE delay_false_login SET attempts = ?, status = ?, last_attempt = ? WHERE id = ?");
+            $updateStmt->execute([$newAttempts, $newStatus, $now, $delayRecord['id']]);
+
+            if ($newStatus == 1) {
+                echo json_encode(['status' => 'locked', 'message' => 'คุณกรอกรหัสผ่านผิดเกิน 3 ครั้ง กรุณารอ 60 วินาที']);
+                exit;
+            }
+        } else {
+            // ผิดครั้งแรก
+            $insertStmt = $pdo->prepare("INSERT INTO delay_false_login (ip_address, username, attempts, status, last_attempt) VALUES (?, ?, 1, 0, ?)");
+            $insertStmt->execute([$ip, $username, $now]);
+        }
+
+        echo json_encode(['status' => 'error', 'message' => 'ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง']);
+        exit;
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?php echo htmlspecialchars($sys_settings['site_name_th']); ?> - เข้าสู่ระบบ</title>
+    <link rel="icon" href="<?php echo htmlspecialchars($sys_settings['favicon_path']); ?>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        sky: {
+                            50: '#f4f6f8',
+                            100: '#e1e5ec',
+                            200: '#c4ccd9',
+                            300: '#9fabbe',
+                            400: '#7587a1',
+                            500: '<?php echo $sys_settings['theme_color']; ?>',
+                            600: '<?php echo $sys_settings['theme_color']; ?>',
+                            700: '#0c1e32',
+                            800: '#081421',
+                            900: '#040a11'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script>
+        (function() {
+            function wrapSwal(swalObj) {
+                if (!swalObj || !swalObj.fire || swalObj._wrapped) return;
+                const originalFire = swalObj.fire;
+                swalObj.fire = function(...args) {
+                    let opts = args[0];
+                    if (opts && typeof opts === 'object') {
+                        if ((opts.icon === 'success' || opts.status === 'success') && opts.timer === undefined && !opts.showConfirmButton && !opts.keepOpen) {
+                            opts.showConfirmButton = false;
+                            opts.timer = 1000;
+                        }
+                        
+                        let titleText = opts.title ? String(opts.title) : '';
+                        let htmlText = opts.html ? String(opts.html) : '';
+                        let isEdit = (titleText.includes('แก้ไข') || titleText.includes('เพิ่ม') || titleText.includes('จัดการ') || htmlText.includes('<input') || htmlText.includes('<select') || htmlText.includes('<textarea')) && !titleText.includes('เปลี่ยนรหัสผ่าน');
+                        if (isEdit) {
+                            opts.width = '80%';
+                            let originalDidOpen = opts.didOpen;
+                            opts.didOpen = function(popupEl) {
+                                if (popupEl) {
+                                    popupEl.style.height = 'auto';
+                                }
+                                if (originalDidOpen) {
+                                    originalDidOpen.apply(this, arguments);
+                                }
+                            };
+                        }
+                    } else if (typeof opts === 'string' && args[2] === 'success') {
+                        return originalFire.call(this, {
+                            title: opts,
+                            text: args[1] || '',
+                            icon: 'success',
+                            showConfirmButton: false,
+                            timer: 1000
+                        });
+                    }
+                    return originalFire.apply(this, args);
+                };
+                swalObj._wrapped = true;
+            }
+            if (window.Swal) wrapSwal(window.Swal);
+        })();
+    </script>
+    <style>
+        body {
+            font-family: 'Sarabun', sans-serif;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        :root {
+            --primary-color: <?php echo $sys_settings['theme_color']; ?>;
+        }
+
+        .bg-sky-600, .from-sky-500, .to-blue-600 {
+            background-color: var(--primary-color) !important;
+            background-image: none !important;
+        }
+        
+        .bg-gradient-to-br, .bg-gradient-to-r {
+            background-image: linear-gradient(135deg, var(--primary-color) 0%, rgba(0,0,0,0.15) 100%) !important;
+        }
+
+        button[type="submit"]:hover {
+            filter: brightness(90%);
+        }
+
+        .text-sky-500, .text-sky-700 {
+            color: var(--primary-color) !important;
+        }
+    </style>
+    </head>
+
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+
+    <div
+        class="glass w-full max-w-4xl h-[600px] rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row animate-fade-in-up">
+
+        <!-- Left Side: Image/Branding -->
+        <div
+            class="w-full md:w-1/2 bg-sky-600 p-10 flex flex-col justify-center items-center text-white relative overflow-hidden">
+            <div class="absolute inset-0 bg-gradient-to-br from-sky-500 to-blue-600 opacity-90"></div>
+            <div
+                class="absolute -top-24 -left-24 w-64 h-64 bg-sky-400 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob">
+            </div>
+            <div
+                class="absolute -bottom-24 -right-24 w-64 h-64 bg-blue-400 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-2000">
+            </div>
+
+            <div class="relative z-10 text-center">
+                <div class="bg-white p-2 rounded-2xl inline-block mb-6 shadow-lg">
+                    <img src="<?php echo htmlspecialchars($sys_settings['logo_path']); ?>" alt="System Logo" class="h-20 w-20 object-cover rounded-xl">
+                </div>
+                <h1 class="text-4xl font-bold mb-2"><?php echo htmlspecialchars($sys_settings['site_name_en']); ?></h1>
+                <p class="text-white/90 text-lg"><?php echo htmlspecialchars($sys_settings['site_name_th']); ?></p>
+                <div class="mt-8 space-y-2 text-sm text-white/80">
+                    <p>สะดวก • ใช้งานง่าย • ไม่ซับซ้อน</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Side: Login Form -->
+        <div class="w-full md:w-1/2 p-10 flex flex-col justify-center bg-white">
+            <h2 class="text-3xl font-bold text-gray-800 mb-2">ยินดีต้อนรับ</h2>
+            <p class="text-gray-500 mb-8">กรุณาเข้าสู่ระบบเพื่อดำเนินการต่อ</p>
+
+            <form id="loginForm" class="space-y-6">
+                <div>
+                    <label class="block text-gray-700 text-sm font-semibold mb-2" for="username">บัญชีผู้ใช้งาน</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                            </svg>
+                        </span>
+                        <input
+                            class="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200 transition-all bg-gray-50 text-gray-800"
+                            id="username" name="username" type="text" placeholder="Username" required>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-gray-700 text-sm font-semibold mb-2" for="password">รหัสผ่าน</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400 pointer-events-none">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z">
+                                </path>
+                            </svg>
+                        </span>
+                        <input
+                            class="w-full pl-10 pr-10 py-3 border border-gray-200 rounded-xl focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200 transition-all bg-gray-50 text-gray-800"
+                            id="password" name="password" type="password" placeholder="••••••••" required>
+                        <button type="button" tabindex="-1" onclick="togglePasswordVisibility('password', this)" class="absolute inset-y-0 right-0 flex items-center pr-3.5 text-gray-400 hover:text-sky-600 focus:outline-none transition-colors cursor-pointer" title="แสดง/ซ่อนรหัสผ่าน">
+                            <i class="far fa-eye text-base"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <button type="submit"
+                    class="w-full bg-gradient-to-r from-sky-500 to-blue-600 text-white font-bold py-3 px-4 rounded-xl hover:shadow-lg transform hover:-translate-y-0.5 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500">
+                    เข้าสู่ระบบ
+                </button>
+            </form>
+
+            <div class="mt-8 text-center">
+                <button onclick="forgotPassword()" class="text-sm text-sky-500 hover:text-sky-700 font-bold transition">
+                    ลืมรหัสผ่าน?
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function togglePasswordVisibility(inputId, btn) {
+            const input = typeof inputId === 'string' ? document.getElementById(inputId) : inputId;
+            if (!input) return;
+            const isPass = input.type === 'password';
+            input.type = isPass ? 'text' : 'password';
+            const icon = btn.querySelector('i') || btn;
+            if (icon) {
+                if (isPass) {
+                    icon.className = 'fas fa-eye-slash text-base';
+                    btn.classList.add('text-sky-600');
+                    btn.classList.remove('text-gray-400');
+                } else {
+                    icon.className = 'far fa-eye text-base';
+                    btn.classList.remove('text-sky-600');
+                    btn.classList.add('text-gray-400');
+                }
+            }
+        }
+
+        function forgotPassword() {
+            Swal.fire({
+                title: 'ลืมรหัสผ่าน?',
+                text: 'ระบบจะทำการรีเซ็ตรหัสผ่านใหม่ให้ท่าน',
+                html: `
+                    <div class="text-left font-[Sarabun] mt-4">
+                        <label class="block text-sm font-bold text-gray-700 mb-2">ระบุชื่อผู้ใช้งาน (Username) ของคุณ</label>
+                        <input id="reset_username" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-sky-500 outline-none transition" placeholder="Username">
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: 'ยืนยันรีเซ็ตรหัสผ่าน',
+                confirmButtonColor: '#0ea5e9',
+                cancelButtonText: 'ยกเลิก',
+                cancelButtonColor: '#cbd5e1',
+                customClass: {
+                    popup: 'rounded-2xl',
+                    confirmButton: 'rounded-xl',
+                    cancelButton: 'rounded-xl'
+                },
+                preConfirm: () => {
+                    const username = Swal.getPopup().querySelector('#reset_username').value;
+                    if (!username) {
+                        Swal.showValidationMessage('กรุณาระบุ Username');
+                    }
+                    return { username: username };
+                }
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    const username = result.value.username;
+
+                    if (username.toLowerCase() === 'admin') {
+                        Swal.fire({
+                            title: 'ไม่อนุญาต',
+                            text: 'ไม่สามารถรีเซ็ตรหัสผ่านของบัญชี admin ได้',
+                            icon: 'error',
+                            confirmButtonColor: '#ef4444',
+                            customClass: { popup: 'rounded-2xl', confirmButton: 'rounded-xl' }
+                        });
+                        return;
+                    }
+
+                    Swal.fire({
+                        title: 'กำลังดำเนินการ...',
+                        timerProgressBar: true,
+                        didOpen: () => { Swal.showLoading(); }
+                    });
+
+                    $.post('api_reset_password_guest.php', { username: username }, function (res) {
+                        let data = res;
+                        if (typeof res === 'string') {
+                            try { data = JSON.parse(res); } catch (e) { }
+                        }
+
+                        if (data.status === 'success') {
+                            const isSameDay = !!data.is_same_day;
+                            const modalTitle = isSameDay ? 'รหัสผ่านที่ขอรีเซ็ตไว้ล่าสุด' : 'รีเซ็ตรหัสผ่านสำเร็จ!';
+                            const modalSubtitle = isSameDay
+                                ? '<div class="text-xs bg-amber-50 border border-amber-200 text-amber-800 p-2.5 rounded-xl mb-3 leading-relaxed"><i class="fas fa-info-circle mr-1"></i> คุณได้ขอรีเซ็ตรหัสผ่านไปแล้วในวันนี้ (ระบบจะรีเซ็ตสิทธิ์ทุกเที่ยงคืน)<br><strong>รหัสผ่านปัจจุบันของคุณที่ขอไว้ล่าสุดคือ:</strong></div>'
+                                : '<p class="text-gray-600 mb-3 text-sm">รหัสผ่านใหม่ของคุณถูกบันทึกลงฐานข้อมูลแล้วคือ:</p>';
+
+                            Swal.fire({
+                                title: modalTitle,
+                                html: `
+                                    <div class="font-[Sarabun] text-center pt-1">
+                                        ${modalSubtitle}
+                                        <div class="relative bg-gradient-to-r from-sky-50 to-emerald-50 border-2 border-emerald-300 p-4 rounded-2xl mb-3 shadow-inner">
+                                            <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">รหัสผ่านสำหรับเข้าสู่ระบบ</div>
+                                            <div id="reset_pass_val" class="text-3xl font-black text-emerald-600 tracking-widest font-mono select-all py-1 cursor-pointer" title="คลิกเพื่อคัดลอก">${data.new_password}</div>
+                                            <div class="mt-2.5">
+                                                <button id="btn_copy_reset_pass" type="button" class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-md shadow-emerald-200">
+                                                    <i class="fas fa-copy"></i> <span id="copy_btn_label">คัดลอกรหัสผ่าน</span>
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div id="auto_copy_status" class="mb-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 transition">
+                                            <i class="fas fa-check-circle text-emerald-600"></i> คัดลอกรหัสผ่านลง Clipboard ให้อัตโนมัติแล้ว
+                                        </div>
+
+                                        <div class="bg-gray-50 border border-gray-200 rounded-xl p-3 text-left text-xs text-gray-600 leading-relaxed space-y-1">
+                                            <p class="font-bold text-gray-700 flex items-center gap-1"><i class="fas fa-shield-alt text-sky-500"></i> ข้อกำหนดความปลอดภัย:</p>
+                                            <p>• รหัสผ่านนี้บันทึกลงฐานข้อมูลเรียบร้อยแล้วและตรงกับระบบ 100%</p>
+                                            <p>• เมื่อเข้าสู่ระบบสำเร็จ ระบบจะ<strong>บังคับให้เปลี่ยนรหัสผ่านทันที</strong></p>
+                                        </div>
+                                    </div>
+                                `,
+                                icon: 'success',
+                                showConfirmButton: true,
+                                confirmButtonText: 'ตกลง, ไปหน้าเข้าสู่ระบบ',
+                                confirmButtonColor: '#0ea5e9',
+                                allowOutsideClick: false,
+                                allowEscapeKey: false,
+                                timer: false,
+                                keepOpen: true,
+                                customClass: {
+                                    popup: 'rounded-3xl shadow-2xl w-[480px]',
+                                    confirmButton: 'rounded-xl px-8 py-3 font-bold text-sm shadow-lg shadow-sky-200 w-full mt-2'
+                                },
+                                didOpen: (popup) => {
+                                    // ฟังก์ชันคัดลอกรหัสผ่านลง Clipboard
+                                    function copyText(val) {
+                                        if (navigator.clipboard && window.isSecureContext) {
+                                            return navigator.clipboard.writeText(val);
+                                        } else {
+                                            return new Promise((resolve, reject) => {
+                                                try {
+                                                    const ta = document.createElement("textarea");
+                                                    ta.value = val;
+                                                    ta.style.position = "fixed";
+                                                    ta.style.left = "-999999px";
+                                                    document.body.appendChild(ta);
+                                                    ta.focus();
+                                                    ta.select();
+                                                    const res = document.execCommand('copy');
+                                                    document.body.removeChild(ta);
+                                                    if (res) resolve(); else reject(new Error('copy failed'));
+                                                } catch (err) { reject(err); }
+                                            });
+                                        }
+                                    }
+
+                                    // คัดลอกลง Clipboard ทันทีที่เปิดหน้าต่าง
+                                    copyText(data.new_password).catch(() => {
+                                        const statusEl = popup.querySelector('#auto_copy_status');
+                                        if (statusEl) statusEl.style.display = 'none';
+                                    });
+
+                                    // กรอกค่าลงในฟอร์ม Login หน้าเว็บให้อัตโนมัติเพื่อความสะดวก
+                                    const uField = document.getElementById('username');
+                                    const pField = document.getElementById('password');
+                                    if (uField) uField.value = username;
+                                    if (pField) pField.value = data.new_password;
+
+                                    // ผูกเหตุการณ์ปุ่มกดคัดลอกซ้ำ
+                                    const copyBtn = popup.querySelector('#btn_copy_reset_pass');
+                                    const copyLabel = popup.querySelector('#copy_btn_label');
+                                    const passBox = popup.querySelector('#reset_pass_val');
+
+                                    function triggerCopy() {
+                                        copyText(data.new_password).then(() => {
+                                            if (copyLabel) copyLabel.innerText = 'คัดลอกเรียบร้อยแล้ว!';
+                                            copyBtn.classList.remove('bg-emerald-600', 'hover:bg-emerald-700');
+                                            copyBtn.classList.add('bg-gray-800', 'hover:bg-black');
+                                            setTimeout(() => {
+                                                if (copyLabel) copyLabel.innerText = 'คัดลอกรหัสผ่าน';
+                                                copyBtn.classList.remove('bg-gray-800', 'hover:bg-black');
+                                                copyBtn.classList.add('bg-emerald-600', 'hover:bg-emerald-700');
+                                            }, 2500);
+                                        });
+                                    }
+
+                                    if (copyBtn) copyBtn.addEventListener('click', triggerCopy);
+                                    if (passBox) passBox.addEventListener('click', triggerCopy);
+                                }
+                            });
+                        } else {
+                            Swal.fire({
+                                title: 'ผิดพลาด',
+                                text: data.message || 'เกิดข้อผิดพลาด',
+                                icon: 'error',
+                                confirmButtonColor: '#ef4444',
+                                customClass: { popup: 'rounded-2xl', confirmButton: 'rounded-xl' }
+                            });
+                        }
+                    }).fail(function () {
+                        Swal.fire('Error', 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้', 'error');
+                    });
+                }
+            });
+        }
+
+        let cooldownInterval;
+
+        function startCooldown(button, originalText) {
+            let timeLeft = 60;
+            button.disabled = true;
+            button.innerHTML = `กรุณารอ ${timeLeft} วินาที`;
+
+            clearInterval(cooldownInterval);
+            cooldownInterval = setInterval(() => {
+                timeLeft--;
+                if (timeLeft <= 0) {
+                    clearInterval(cooldownInterval);
+                    button.disabled = false;
+                    button.innerHTML = originalText;
+                } else {
+                    button.innerHTML = `กรุณารอ ${timeLeft} วินาที`;
+                }
+            }, 1000);
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const uInput = this.querySelector('#username');
+            const pInput = this.querySelector('#password');
+            if (uInput) uInput.value = uInput.value.trim();
+            if (pInput) pInput.value = pInput.value.trim();
+
+            const formData = new FormData(this);
+            const button = this.querySelector('button[type="submit"]');
+            const originalText = button.innerHTML;
+
+            button.disabled = true;
+
+            // แสดง SweetAlert สถานะ loading
+            Swal.fire({
+                title: 'กำลังตรวจสอบ...',
+                text: 'กรุณารอสักครู่',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+
+            try {
+                const response = await fetch('index.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'เข้าสู่ระบบสำเร็จ',
+                        text: 'กำลังพาท่านไปยังหน้าหลัก...',
+                        timer: 1500,
+                        showConfirmButton: false,
+                        background: '#f0f9ff',
+                        color: '#0c4a6e'
+                    }).then(() => {
+                        if (result.role === 'user') {
+                            window.location.href = 'inventory.php';
+                        } else {
+                            window.location.href = 'dashboard.php';
+                        }
+                    });
+                } else if (result.status === 'locked') {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'ระงับการเข้าสู่ระบบ',
+                        text: result.message,
+                        confirmButtonColor: '#ef4444'
+                    });
+                    startCooldown(button, originalText);
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'เข้าสู่ระบบไม่สำเร็จ',
+                        text: result.message,
+                        confirmButtonColor: '#0ea5e9'
+                    });
+                    button.disabled = false;
+                    button.innerHTML = originalText;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                Swal.fire({
+                    icon: 'error',
+                    title: 'เกิดข้อผิดพลาด',
+                    text: 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้',
+                    confirmButtonColor: '#0ea5e9'
+                });
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        });
+
+        // ตรวจสอบกรณีเซสชันหมดอายุจากการไม่ใช้งาน
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('timeout') === '1') {
+            Swal.fire({
+                icon: 'info',
+                title: 'หมดเวลาการใช้งานระบบ',
+                text: 'ระบบได้นำท่านออกจากระบบโดยอัตโนมัติ เนื่องจากไม่มีการใช้งานเกิน 1 ชั่วโมง',
+                confirmButtonColor: '#0ea5e9',
+                confirmButtonText: 'ตกลง',
+                customClass: {
+                    popup: 'rounded-2xl font-[Sarabun]',
+                    confirmButton: 'rounded-xl px-5 py-2'
+                }
+            });
+            // ล้างพารามิเตอร์ออกจาก URL เพื่อความสวยงาม
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    </script>
+</body>
+
+</html>
