@@ -638,8 +638,9 @@ function hasRole($needV, $role)
 
                 // 2. Fetch Daily Approved Requests
                 // Group by last_approve to show batch requests
+                $idCastExpr = (($db_driver ?? 'mysql') === 'pgsql') ? 'CAST(r.id AS VARCHAR)' : 'CAST(r.id AS CHAR)';
                 $sqlDaily = "SELECT 
-                                r.last_approve,
+                                MAX(r.last_approve) as last_approve,
                                 MAX(r.id) as id,
                                 MAX(r.approver_supply_date) as approver_supply_date,
                                 MAX(r.request_name) as request_name,
@@ -650,7 +651,7 @@ function hasRole($needV, $role)
                              JOIN users u ON r.user_id = u.id 
                              WHERE r.status = 'approved' 
                              AND DATE(r.approver_supply_date) = ?
-                             GROUP BY CASE WHEN r.last_approve IS NOT NULL AND r.last_approve != '' THEN r.last_approve ELSE r.id END
+                             GROUP BY CASE WHEN r.last_approve IS NOT NULL AND r.last_approve != '' THEN r.last_approve ELSE $idCastExpr END
                              ORDER BY MAX(r.approver_supply_date) DESC";
                 $stmtDaily = $pdo->prepare($sqlDaily);
                 $stmtDaily->execute([$filterDate]);
