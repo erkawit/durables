@@ -109,14 +109,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // 3. Fetch Users
 // Corrected Join Table Names
+$joinCast = (($db_driver ?? 'mysql') === 'pgsql') ? 'CAST(%s AS VARCHAR)' : '%s';
+$posJoin = sprintf($joinCast, 'p.id');
+$lvlJoin = sprintf($joinCast, 'l.id');
 $sql = "SELECT u.*, 
            CONCAT(u.prefix, u.firstname, ' ', u.lastname) as fullname,
            p.position as position_name,
            l.level_position as level_name
         FROM users u 
-        LEFT JOIN authen_position p ON u.position = p.id
-        LEFT JOIN authen_l_position l ON u.level = l.id
-        ORDER BY CASE WHEN FIND_IN_SET(u.role, 'admin,supply_officer,director,head,supply_head,user,staff') = 0 THEN 99 ELSE FIND_IN_SET(u.role, 'admin,supply_officer,director,head,supply_head,user,staff') END, u.id ASC";
+        LEFT JOIN authen_position p ON u.position = $posJoin
+        LEFT JOIN authen_l_position l ON u.level = $lvlJoin
+        ORDER BY CASE u.role
+            WHEN 'admin' THEN 1
+            WHEN 'supply_officer' THEN 2
+            WHEN 'director' THEN 3
+            WHEN 'head' THEN 4
+            WHEN 'supply_head' THEN 5
+            WHEN 'user' THEN 6
+            WHEN 'staff' THEN 7
+            ELSE 99
+        END, u.id ASC";
 
 $users = $pdo->query($sql)->fetchAll();
 
