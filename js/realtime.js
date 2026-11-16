@@ -1,5 +1,13 @@
 // js/realtime.js
 document.addEventListener("DOMContentLoaded", function () {
+    // Local XAMPP Node.js Socket.io coordinator only runs on localhost/http
+    if (window.location.protocol === 'https:' || !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+        return;
+    }
+    if (typeof io !== 'function') {
+        return;
+    }
+
     // Connect to Node.js server dynamically using the host's hostname
     const socket = io('http://' + window.location.hostname + ':3000');
 

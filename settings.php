@@ -399,6 +399,15 @@ npm start</pre>
         function checkNodeStatus() {
             const badge = $('#nodeStatusBadge');
             const startBtn = $('#startNodeBtn');
+
+            if (window.location.protocol === 'https:' || !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+                badge.html('<span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span> Cloud Mode (Vercel + Neon)</span>');
+                badge.removeClass('bg-gray-100 text-gray-700 border-gray-200 bg-red-100 text-red-700 border-red-200');
+                badge.addClass('bg-blue-50 text-blue-700 border-blue-200');
+                startBtn.addClass('hidden');
+                return;
+            }
+
             badge.html('<i class="fas fa-spinner fa-spin mr-1"></i>กำลังตรวจสอบ...');
             badge.removeClass('bg-green-100 text-green-700 border-green-200 bg-red-100 text-red-700 border-red-200');
             badge.addClass('bg-gray-100 text-gray-700 border-gray-200');
