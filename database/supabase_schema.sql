@@ -160,3 +160,43 @@ CREATE TABLE IF NOT EXISTS system_settings (
     setting_value TEXT DEFAULT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- 13. Product Type table
+CREATE TABLE IF NOT EXISTS product_type (
+    id SERIAL PRIMARY KEY,
+    type_name VARCHAR(100) NOT NULL
+);
+
+-- 14. Type Volume (Units) table
+CREATE TABLE IF NOT EXISTS type_volume (
+    id SERIAL PRIMARY KEY,
+    type_volume VARCHAR(255) NOT NULL
+);
+
+-- 15. Deleted Requests Log table
+CREATE TABLE IF NOT EXISTS deleted_requests_log (
+    id SERIAL PRIMARY KEY,
+    request_id INT,
+    request_name VARCHAR(100),
+    last_approve VARCHAR(100) DEFAULT NULL,
+    requester_name VARCHAR(255),
+    requester_section VARCHAR(255),
+    request_date TIMESTAMP WITH TIME ZONE,
+    status_before VARCHAR(50),
+    items_summary TEXT,
+    deleted_by_id INT,
+    deleted_by_name VARCHAR(255),
+    delete_reason TEXT NOT NULL,
+    deleted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    restored_stock INT DEFAULT 0
+);
+
+-- 16. User Password Resets table
+CREATE TABLE IF NOT EXISTS user_password_resets (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL,
+    temp_password VARCHAR(255) NOT NULL,
+    reset_date DATE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    is_active INT DEFAULT 1
+);

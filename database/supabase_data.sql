@@ -509,3 +509,38 @@ INSERT INTO procurement_items ("id", "procurement_id", "supply_id", "qty", "unit
 INSERT INTO procurement_items ("id", "procurement_id", "supply_id", "qty", "unit_price") VALUES (266, 2, 127, 18, 4650.00) ON CONFLICT DO NOTHING;
 SELECT setval('procurement_items_id_seq', COALESCE((SELECT MAX(id) FROM procurement_items), 1));
 
+-- Table: product_type (5 rows)
+INSERT INTO product_type (id, type_name) VALUES (1, 'วัสดุสำนักงาน') ON CONFLICT DO NOTHING;
+INSERT INTO product_type (id, type_name) VALUES (2, 'วัสดุประชาสัมพันธ์') ON CONFLICT DO NOTHING;
+INSERT INTO product_type (id, type_name) VALUES (3, 'วัสดุคอมพิวเตอร์') ON CONFLICT DO NOTHING;
+INSERT INTO product_type (id, type_name) VALUES (4, 'วัสดุไฟฟ้า') ON CONFLICT DO NOTHING;
+INSERT INTO product_type (id, type_name) VALUES (55, 'หมึกเครื่องสแกนเนอร์ 2552CI สีเหลือง') ON CONFLICT DO NOTHING;
+SELECT setval('product_type_id_seq', COALESCE((SELECT MAX(id) FROM product_type), 1));
+
+-- Table: type_volume (24 rows)
+INSERT INTO type_volume (id, type_volume) VALUES (1, 'ชิ้น') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (2, 'แท่ง') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (3, 'ด้าม') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (4, 'แพ็ก') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (5, 'ห่อ') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (6, 'รีม') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (7, 'อัน') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (8, 'เล่ม') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (9, 'กล่อง') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (10, 'หน่วย') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (11, 'ถุง') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (12, 'ก้อน') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (13, 'ขวด') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (14, 'ตลับ') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (15, 'หลอด') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (16, 'ตัว') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (17, 'ม้วน') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (18, 'แฟ้ม') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (19, 'เครื่อง') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (20, 'ซอง') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (21, 'แผ่น') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (22, 'อัน') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (23, 'มัด') ON CONFLICT DO NOTHING;
+INSERT INTO type_volume (id, type_volume) VALUES (24, 'ชุด') ON CONFLICT DO NOTHING;
+SELECT setval('type_volume_id_seq', COALESCE((SELECT MAX(id) FROM type_volume), 1));
+
