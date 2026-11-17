@@ -397,15 +397,15 @@ function thaiMonth($m)
                 FROM request_items ri
                 JOIN requests r ON ri.request_id = r.id
                 JOIN supplies s ON ri.supply_id = s.id
-                WHERE r.status = 'approved' AND YEAR(r.approver_supply_date) = ?";
+                WHERE r.status = 'approved' AND EXTRACT(YEAR FROM r.approver_supply_date) = ?";
 
         $params = [$year];
         if (!$isYearly) {
-            $sql .= " AND MONTH(r.approver_supply_date) = ?";
+            $sql .= " AND EXTRACT(MONTH FROM r.approver_supply_date) = ?";
             $params[] = $month;
         }
 
-        $sql .= " GROUP BY s.id ORDER BY total_qty DESC";
+        $sql .= " GROUP BY s.id, s.code, s.name, s.unit ORDER BY total_qty DESC";
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $items = $stmt->fetchAll();
@@ -458,13 +458,13 @@ function thaiMonth($m)
                 FROM request_items ri
                 JOIN requests r ON ri.request_id = r.id
                 JOIN users u ON r.user_id = u.id
-                WHERE ri.supply_id = ? AND r.status = 'approved' AND YEAR(r.approver_supply_date) = ?";
+                WHERE ri.supply_id = ? AND r.status = 'approved' AND EXTRACT(YEAR FROM r.approver_supply_date) = ?";
 
         $params = [$supplyId, $year];
         $periodStr = "ปี พ.ศ. " . ($year + 543);
 
         if ($month != 'all') {
-            $sql .= " AND MONTH(r.approver_supply_date) = ?";
+            $sql .= " AND EXTRACT(MONTH FROM r.approver_supply_date) = ?";
             $params[] = $month;
             $periodStr .= " เดือน " . thaiMonth($month);
         }
@@ -666,10 +666,10 @@ function thaiMonth($m)
     <?php elseif ($type == 'monthly'): ?>
         <?php
         $monthlyData = array_fill(1, 12, 0);
-        $stmt = $pdo->prepare("SELECT MONTH(request_date) as m, COUNT(*) as c FROM requests WHERE YEAR(request_date) = ? GROUP BY m");
+        $stmt = $pdo->prepare("SELECT EXTRACT(MONTH FROM request_date) as m, COUNT(*) as c FROM requests WHERE EXTRACT(YEAR FROM request_date) = ? GROUP BY m");
         $stmt->execute([$year]);
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $monthlyData[$row['m']] = $row['c'];
+            $monthlyData[(int)$row['m']] = (int)$row['c'];
         }
         $monthLabels = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
         ?>
@@ -707,7 +707,7 @@ function thaiMonth($m)
                              JOIN supplies s ON ri.supply_id = s.id
                              JOIN requests r ON ri.request_id = r.id
                              WHERE r.status = 'approved'
-                             GROUP BY ri.supply_id ORDER BY total_qty DESC LIMIT 10");
+                             GROUP BY ri.supply_id, s.name, s.code, s.unit ORDER BY total_qty DESC LIMIT 10");
         $topItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
         ?>
         <div class="report-info">
