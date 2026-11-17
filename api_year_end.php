@@ -11,7 +11,27 @@ if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'supp
     exit;
 }
 
+$isPgsql = (($db_driver ?? 'mysql') === 'pgsql');
 $action = $_GET['action'] ?? '';
+
+function yearEndTableExists($pdo, $tableName, $isPgsql) {
+    if ($isPgsql) {
+        $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ?");
+        $stmt->execute([$tableName]);
+        return (bool)$stmt->fetchColumn();
+    }
+    $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
+    $stmt->execute([$tableName]);
+    return ($stmt->rowCount() > 0);
+}
+
+function yearEndCreateArchiveLike($pdo, $archiveTable, $sourceTable, $isPgsql) {
+    if ($isPgsql) {
+        $pdo->exec("CREATE TABLE \"$archiveTable\" (LIKE \"$sourceTable\" INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)");
+    } else {
+        $pdo->exec("CREATE TABLE `$archiveTable` LIKE `$sourceTable`");
+    }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'backup') {
@@ -32,40 +52,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // 1. Drop existing archive tables if overwrite is requested
             foreach ($tables as $orig => $arch) {
-                $pdo->exec("DROP TABLE IF EXISTS `$arch`");
+                $pdo->exec("DROP TABLE IF EXISTS $arch");
             }
 
             // 2. Re-create and populate archive_supplies
-            $pdo->exec("CREATE TABLE `archive_supplies_$year` LIKE `supplies`");
-            $pdo->exec("INSERT INTO `archive_supplies_$year` SELECT * FROM `supplies`");
+            yearEndCreateArchiveLike($pdo, "archive_supplies_$year", 'supplies', $isPgsql);
+            $pdo->exec("INSERT INTO archive_supplies_$year SELECT * FROM supplies");
 
             // 3. Re-create and populate archive_requests (Filter by year of request_date)
-            $pdo->exec("CREATE TABLE `archive_requests_$year` LIKE `requests`");
-            $stmtReq = $pdo->prepare("INSERT INTO `archive_requests_$year` SELECT * FROM `requests` WHERE YEAR(`request_date`) = ?");
+            yearEndCreateArchiveLike($pdo, "archive_requests_$year", 'requests', $isPgsql);
+            $stmtReq = $pdo->prepare("INSERT INTO archive_requests_$year SELECT * FROM requests WHERE EXTRACT(YEAR FROM request_date) = ?");
             $stmtReq->execute([$year]);
 
             // 4. Re-create and populate archive_request_items (Filter by year of request_date)
-            $pdo->exec("CREATE TABLE `archive_request_items_$year` LIKE `request_items`");
+            yearEndCreateArchiveLike($pdo, "archive_request_items_$year", 'request_items', $isPgsql);
             $stmtItems = $pdo->prepare("
-                INSERT INTO `archive_request_items_$year` 
-                SELECT ri.* FROM `request_items` ri 
-                JOIN `requests` r ON ri.`request_id` = r.`id` 
-                WHERE YEAR(r.`request_date`) = ?
+                INSERT INTO archive_request_items_$year
+                SELECT ri.* FROM request_items ri
+                JOIN requests r ON ri.request_id = r.id
+                WHERE EXTRACT(YEAR FROM r.request_date) = ?
             ");
             $stmtItems->execute([$year]);
 
             // 5. Re-create and populate archive_procurements (Filter by year of import_date)
-            $pdo->exec("CREATE TABLE `archive_procurements_$year` LIKE `procurements`");
-            $stmtProc = $pdo->prepare("INSERT INTO `archive_procurements_$year` SELECT * FROM `procurements` WHERE YEAR(`import_date`) = ?");
+            yearEndCreateArchiveLike($pdo, "archive_procurements_$year", 'procurements', $isPgsql);
+            $stmtProc = $pdo->prepare("INSERT INTO archive_procurements_$year SELECT * FROM procurements WHERE EXTRACT(YEAR FROM import_date) = ?");
             $stmtProc->execute([$year]);
 
             // 6. Re-create and populate archive_procurement_items (Filter by year of import_date)
-            $pdo->exec("CREATE TABLE `archive_procurement_items_$year` LIKE `procurement_items`");
+            yearEndCreateArchiveLike($pdo, "archive_procurement_items_$year", 'procurement_items', $isPgsql);
             $stmtProcItems = $pdo->prepare("
-                INSERT INTO `archive_procurement_items_$year` 
-                SELECT pi.* FROM `procurement_items` pi 
-                JOIN `procurements` p ON pi.`procurement_id` = p.`id` 
-                WHERE YEAR(p.`import_date`) = ?
+                INSERT INTO archive_procurement_items_$year
+                SELECT pi.* FROM procurement_items pi
+                JOIN procurements p ON pi.procurement_id = p.id
+                WHERE EXTRACT(YEAR FROM p.import_date) = ?
             ");
             $stmtProcItems->execute([$year]);
 
@@ -90,13 +110,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
         try {
             $tableName = "archive_supplies_$year";
-            $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
-            $stmt->execute([$tableName]);
-            $exists = ($stmt->rowCount() > 0);
+            $exists = yearEndTableExists($pdo, $tableName, $isPgsql);
 
             $count = 0;
             if ($exists) {
-                $count = (int)$pdo->query("SELECT COUNT(*) FROM `$tableName`")->fetchColumn();
+                $count = (int)$pdo->query("SELECT COUNT(*) FROM $tableName")->fetchColumn();
             }
 
             echo json_encode(['status' => 'success', 'exists' => $exists, 'count' => $count]);
@@ -116,9 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         try {
             // Check if archive tables exist
             $chkTable = "archive_supplies_$year";
-            $stmtChk = $pdo->prepare("SHOW TABLES LIKE ?");
-            $stmtChk->execute([$chkTable]);
-            if ($stmtChk->rowCount() == 0) {
+            if (!yearEndTableExists($pdo, $chkTable, $isPgsql)) {
                 echo json_encode(['status' => 'error', 'message' => "ยังไม่มีการสำรองข้อมูลของปี $year กรุณากดปุ่มสำรองข้อมูลก่อน"]);
                 exit;
             }
@@ -128,12 +144,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                 SELECT s.code, s.name, s.unit, s.price,
                        SUM(COALESCE(ri.approved_qty, ri.qty)) as total_qty,
                        SUM(COALESCE(ri.approved_qty, ri.qty) * s.price) as total_expenditure
-                FROM `archive_request_items_$year` ri
-                JOIN `archive_requests_$year` r ON ri.request_id = r.id
-                JOIN `archive_supplies_$year` s ON ri.supply_id = s.id
+                FROM archive_request_items_$year ri
+                JOIN archive_requests_$year r ON ri.request_id = r.id
+                JOIN archive_supplies_$year s ON ri.supply_id = s.id
                 WHERE r.status IN ('approved', 'completed')
                   AND (ri.is_deleted IS NULL OR ri.is_deleted = 0)
-                GROUP BY s.id
+                GROUP BY s.id, s.code, s.name, s.unit, s.price
                 ORDER BY total_qty DESC
             ";
             $byQty = $pdo->query($q1)->fetchAll();
@@ -143,33 +159,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                 SELECT s.code, s.name, s.unit, s.price,
                        SUM(COALESCE(ri.approved_qty, ri.qty)) as total_qty,
                        SUM(COALESCE(ri.approved_qty, ri.qty) * s.price) as total_expenditure
-                FROM `archive_request_items_$year` ri
-                JOIN `archive_requests_$year` r ON ri.request_id = r.id
-                JOIN `archive_supplies_$year` s ON ri.supply_id = s.id
+                FROM archive_request_items_$year ri
+                JOIN archive_requests_$year r ON ri.request_id = r.id
+                JOIN archive_supplies_$year s ON ri.supply_id = s.id
                 WHERE r.status IN ('approved', 'completed')
                   AND (ri.is_deleted IS NULL OR ri.is_deleted = 0)
-                GROUP BY s.id
+                GROUP BY s.id, s.code, s.name, s.unit, s.price
                 ORDER BY total_expenditure DESC
             ";
             $byValue = $pdo->query($q2)->fetchAll();
 
             // C. Anomaly analysis
+            $roundAvg = $isPgsql ? 'ROUND(CAST(avg_tbl.avg_qty AS NUMERIC), 2)' : 'ROUND(avg_tbl.avg_qty, 2)';
+            $roundMult = $isPgsql ? 'ROUND(CAST((COALESCE(ri.approved_qty, ri.qty) / NULLIF(avg_tbl.avg_qty, 0)) AS NUMERIC), 1)' : 'ROUND((COALESCE(ri.approved_qty, ri.qty) / NULLIF(avg_tbl.avg_qty, 0)), 1)';
             $q3 = "
                 SELECT r.request_name, r.request_date,
                        CONCAT(u.prefix, u.firstname, ' ', u.lastname) as requester,
                        r.section, s.code, s.name, s.unit, s.price,
                        ri.qty as requested_qty,
                        COALESCE(ri.approved_qty, ri.qty) as approved_qty,
-                       ROUND(avg_tbl.avg_qty, 2) as avg_qty,
-                       ROUND((COALESCE(ri.approved_qty, ri.qty) / avg_tbl.avg_qty), 1) as multiplier,
+                       $roundAvg as avg_qty,
+                       $roundMult as multiplier,
                        (COALESCE(ri.approved_qty, ri.qty) * s.price) as total_expenditure
-                FROM `archive_request_items_$year` ri
-                JOIN `archive_requests_$year` r ON ri.request_id = r.id
-                JOIN `archive_supplies_$year` s ON ri.supply_id = s.id
-                JOIN `users` u ON r.user_id = u.id
+                FROM archive_request_items_$year ri
+                JOIN archive_requests_$year r ON ri.request_id = r.id
+                JOIN archive_supplies_$year s ON ri.supply_id = s.id
+                JOIN users u ON r.user_id = u.id
                 JOIN (
                     SELECT supply_id, AVG(COALESCE(qty, 1)) as avg_qty
-                    FROM `archive_request_items_$year`
+                    FROM archive_request_items_$year
                     WHERE (is_deleted IS NULL OR is_deleted = 0)
                     GROUP BY supply_id
                 ) avg_tbl ON s.id = avg_tbl.supply_id
